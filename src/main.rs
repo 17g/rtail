@@ -44,6 +44,8 @@ fn print_usage(program: &str, options: &Options){
     process::exit(0);
 }
 
+const BUF_SIZE :usize = 1024;
+
 fn tail(path: &str, count: u64){
     let file = match File::open(path){
         Err (why) => panic!("Cannot open file! :{}", Error::description(&why)),
@@ -62,28 +64,34 @@ fn tail(path: &str, count: u64){
 
     let mut line_count = 0;
     let mut current_pos = f_size - 2;
-    let mut buf = [0;1];
-    loop {
+    let mut buf = [0;BUF_SIZE];
+    'outer: loop {
+        if current_pos == 0 {
+            break;
+        }
         match reader.seek(SeekFrom::Start(current_pos)){
             Err(why) => panic!("Cannot move offset! offset:{} cause:{}", current_pos, why),
             Ok(_) => current_pos
         };
-        match reader.read_exact(&mut buf){
+        match reader.read(&mut buf){
             Err(why) => panic!("Cannot read offset byte! offset:{} cause:{}", current_pos, why),
             Ok(_) => current_pos
         };
-        if buf[0] == 0xA {
-            line_count += 1;
-        }
-        //println!("{}", line_count);
-        if line_count == count {
-            break;
-        }
-        current_pos -= 1;
-        //println!("{}", current_pos);
-        if current_pos <= 0 {
-            current_pos = 0;
-            break;
+        for i in 0..BUF_SIZE{
+            if buf[i] == 0xA {
+                line_count += 1;
+            }
+            //println!("{}", line_count);
+            if line_count == count {
+                break 'outer;
+            }
+
+            current_pos -= 1;
+            //println!("{}", current_pos);
+            if current_pos <= 0 {
+                current_pos = 0;
+                break 'outer;
+            }
         }
     }
     current_pos += 1;
