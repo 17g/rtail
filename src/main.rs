@@ -16,7 +16,7 @@ fn main(){
         Err(why) => panic!("Cannot parse command args :{}", why),
         Ok(p) => p,
     };
-    if cmd_args.opt_present("h") {
+    if cmd_args.opt_present("h") || args.len() < 2 {
         print_usage(&program, &options);
     }
     let line_number = if cmd_args.opt_present("n") {
@@ -48,7 +48,7 @@ const BUF_SIZE :usize = 1024;
 
 fn tail(path: &str, count: u64){
     let file = match File::open(path){
-        Err (why) => panic!("Cannot open file! :{}", Error::description(&why)),
+        Err (why) => panic!("Cannot open file! file:{} cause:{}", path, Error::description(&why)),
         Ok(file) => file
     };
     let f_metadata = match file.metadata(){
@@ -64,28 +64,29 @@ fn tail(path: &str, count: u64){
 
     let mut line_count = 0;
     let mut current_pos = f_size - 2;
+    let mut read_start = if (f_size -2) > BUF_SIZE as u64 {
+                                        f_size - 2 - BUF_SIZE as u64
+                                      }else{
+                                        0
+                                      };
     let mut buf = [0;BUF_SIZE];
     'outer: loop {
-        if current_pos == 0 {
-            break;
-        }
-        match reader.seek(SeekFrom::Start(current_pos)){
+        match reader.seek(SeekFrom::Start(read_start)){
             Err(why) => panic!("Cannot move offset! offset:{} cause:{}", current_pos, why),
             Ok(_) => current_pos
         };
-        match reader.read(&mut buf){
+        let b = match reader.read(&mut buf){
             Err(why) => panic!("Cannot read offset byte! offset:{} cause:{}", current_pos, why),
-            Ok(_) => current_pos
+            Ok(b) => b
         };
-        for i in 0..BUF_SIZE{
-            if buf[i] == 0xA {
+        for i in 0..b{
+            if buf[b-(i+1)] == 0xA {
                 line_count += 1;
             }
-            //println!("{}", line_count);
+           // println!("{}, {}", line_count, i);
             if line_count == count {
                 break 'outer;
             }
-
             current_pos -= 1;
             //println!("{}", current_pos);
             if current_pos <= 0 {
@@ -93,8 +94,13 @@ fn tail(path: &str, count: u64){
                 break 'outer;
             }
         }
+        read_start = if read_start > BUF_SIZE as u64 {
+                        read_start - BUF_SIZE as u64
+                     }else{
+                        0
+                     }
     }
-    current_pos += 1;
+    //println!("last pos :{}", current_pos);
     match reader.seek(SeekFrom::Start(current_pos)){
         Err(why) => panic!("Cannot read offset byte! offset:{} cause:{}", current_pos, why),
         Ok(_) => current_pos
