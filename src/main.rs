@@ -3,7 +3,7 @@ extern crate getopts;
 use std::{env, process};
 use getopts::Options;
 use std::fs::File;
-use std::io::{BufReader, Read, SeekFrom, Seek};
+use std::io::{BufReader, Read, BufRead, SeekFrom, Seek, stdin};
 use std::error::Error;
 
 fn main(){
@@ -16,7 +16,7 @@ fn main(){
         Err(why) => panic!("Cannot parse command args :{}", why),
         Ok(p) => p,
     };
-    if cmd_args.opt_present("h") || args.len() < 2 {
+    if cmd_args.opt_present("h") {
         print_usage(&program, &options);
     }
     let line_number = if cmd_args.opt_present("n") {
@@ -31,11 +31,12 @@ fn main(){
     }else{
         10
     };
-    let file = match args.last().clone(){
-        None => panic!("specify file"),
-        Some(file) => file
-    };
-    tail(file, line_number);
+    if cmd_args.free.is_empty(){
+        tail_stdin(line_number);
+    }else{
+        let file = cmd_args.free[0].clone();
+        tail(&file, line_number);
+    }
 }
 
 fn print_usage(program: &str, options: &Options){
@@ -44,9 +45,32 @@ fn print_usage(program: &str, options: &Options){
     process::exit(0);
 }
 
+fn tail_stdin(count: u64){
+    let stdin = stdin();
+    let mut line_strs :Vec<String> = Vec::new();
+    for line in stdin.lock().lines(){
+        line_strs.push(match line{
+            Err (why) => panic!("Cannot read strin! cause:{}", Error::description(&why)),
+            Ok(l) => l
+        });
+    }
+    let mut result = String::new();
+    let end_line = line_strs.len() as u64;
+    let start_line = if (end_line) > count {
+                        end_line - count
+                     }else{
+                        0
+                     };
+    for n in start_line..end_line {
+        result += &line_strs[n as usize][..];
+        result += "\n";
+    }
+    print_result(result);
+}
+
 const BUF_SIZE :usize = 1024;
 
-fn tail(path: &str, count: u64){
+fn tail(path: &String, count: u64){
     let file = match File::open(path){
         Err (why) => panic!("Cannot open file! file:{} cause:{}", path, Error::description(&why)),
         Ok(file) => file
@@ -65,10 +89,10 @@ fn tail(path: &str, count: u64){
     let mut line_count = 0;
     let mut current_pos = f_size - 2;
     let mut read_start = if (f_size -2) > BUF_SIZE as u64 {
-                                        f_size - 2 - BUF_SIZE as u64
-                                      }else{
-                                        0
-                                      };
+                            f_size - 2 - BUF_SIZE as u64
+                         }else{
+                            0
+                         };
     let mut buf = [0;BUF_SIZE];
     'outer: loop {
         match reader.seek(SeekFrom::Start(read_start)){
