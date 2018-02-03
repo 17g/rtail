@@ -4,12 +4,13 @@ extern crate notify;
 use std::{env, process};
 use getopts::Options;
 use std::fs::File;
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::io::{BufReader, Read, BufRead, SeekFrom, Seek, stdin};
 use std::error::Error;
 use notify::{RecommendedWatcher, Watcher, RecursiveMode};
-use notify::op::WRITE;
 use std::sync::mpsc::channel;
+use std::time::Duration;
 
 fn main(){
     let args: Vec<String> = env::args().collect();
@@ -78,7 +79,8 @@ fn tail_stdin(count: u64){
 const BUF_SIZE :usize = 1024;
 
 fn tail_file(path: &String, count: u64, fflag: bool){
-    let file = match File::open(path){
+    //let file = match File::open(path){
+    let file = match OpenOptions::new().read(true).open(path) {
         Err (why) => panic!("Cannot open file! file:{} cause:{}", path, Error::description(&why)),
         Ok(file) => file
     };
@@ -144,6 +146,9 @@ fn tail_file(path: &String, count: u64, fflag: bool){
     };
     print_result(buf_str);
     if fflag {
+        if cfg!(target_os = "windows") {
+            println!("");
+        }
         if let Err(why) = tail_file_follow(&mut reader, path, f_size){
             panic!("Cannot follow file! file:{:?} cause:{}", reader.by_ref(), Error::description(&why))
         }
@@ -152,7 +157,7 @@ fn tail_file(path: &String, count: u64, fflag: bool){
 
 fn tail_file_follow(reader: &mut BufReader<File>, spath: &String, file_size: u64)->notify::Result<()>{
     let (tx, rx) = channel();
-    let mut watcher: RecommendedWatcher = try!(Watcher::new_raw(tx));
+    let mut watcher: RecommendedWatcher = try!(Watcher::new(tx,Duration::from_secs(1)));
     let path = Path::new(spath);
     try!(watcher.watch(path, RecursiveMode::NonRecursive));
     let mut start_byte = file_size;
@@ -160,24 +165,18 @@ fn tail_file_follow(reader: &mut BufReader<File>, spath: &String, file_size: u64
     loop{
         match rx.recv(){
             Err(e) => println!("watch error: {:?}", e),
-            Ok(event) => {
-                            let op_val = match event.op {
-                              Err(why) => panic!("Cannot get notify event! offset:{} cause:{}", start_byte, Error::description(&why)),
-                              Ok(r) => r
+            Ok(_) => { 
+                            match reader.seek(SeekFrom::Start(start_byte)){
+                                Err(why) => panic!("Cannot move offset! offset:{} cause:{}", start_byte, Error::description(&why)),
+                                Ok(_) => start_byte
                             };
-                            if op_val == WRITE {
-                              match reader.seek(SeekFrom::Start(start_byte)){
-                                  Err(why) => panic!("Cannot move offset! offset:{} cause:{}", start_byte, Error::description(&why)),
-                                  Ok(_) => start_byte
-                              };
-                              let read_byte = match reader.read_to_string(&mut buf_str){
-                                  Err(why) => panic!("Cannot read offset byte! offset:{} cause:{}",start_byte, Error::description(&why)),
-                                  Ok(b) => b
-                              };
-                              start_byte += read_byte as u64;
-                              print_result(buf_str.clone());
-                              buf_str.clear();
-                            }
+                            let read_byte = match reader.read_to_string(&mut buf_str){
+                                Err(why) => panic!("Cannot read offset byte! offset:{} cause:{}",start_byte, Error::description(&why)),
+                                Ok(b) => b
+                            };
+                            start_byte += read_byte as u64;
+                            print_result(buf_str.clone());
+                            buf_str.clear();
                          }
         }
     }
